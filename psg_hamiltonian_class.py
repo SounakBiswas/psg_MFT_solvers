@@ -36,7 +36,7 @@ class psg_lattice:
             b_1_vec = 2. * np.pi / a_1_vec
             self.bvectors.append(b_1_vec)
             unit_k_1_vec = b_1_vec / n_1
-            lambda_1_list=np.array(range(0,n1))
+            lambda_1_list=np.array(range(0,n_1))
             self.k_list = np.empty((n_1, 1))
             for i in range(n_1):
                 self.k_list[i][0] = unit_k_1_vec[0] * lambda_1_list[i]
@@ -58,6 +58,8 @@ class psg_lattice:
             for i in range(n_1):
                 for j in range(n_2):
                     self.k_list[i][j] = lambda_1_list[i] * unit_k_1_vec + lambda_2_list[j] * unit_k_2_vec
+            self.k_list = np.reshape(self.k_list, (n_1 * n_2 , 2))
+            print("we are in 2d")
         elif self.n_of_sites.size == 3:
             n_1 = self.n_of_sites[0]
             n_2 = self.n_of_sites[1]
@@ -89,6 +91,15 @@ class psg_lattice:
         self.bvectors = np.array(self.bvectors)
     def draw_BZ(self):  # paint the BZ given the bravais lattice structure
         pass
+    def fermi_dist_zeroT(self,flattened_energies) :
+        half_level=(self.norbital)*self.nsites
+
+        tmp=np.sort(flattened_energies)
+        fe=tmp[half_level];
+        fermi_dist=self.fermi_function(flattened_energies,fe)
+        #
+
+        return fermi_dist
 
     def draw_unit_cell(self):  # paint the unit cell of the lattice
         pass
@@ -112,6 +123,8 @@ class psg_lattice:
         #    print("wrong parameters.")
     def initH(self): # organise the bond information
         self.phaselist = np.array(self.phaselist, dtype=np.cdouble)
+        #print(self.phaselist.shape)
+        #sys.stdin.read(1)
         self.repeated_phase = np.repeat(self.phaselist, self.nband, axis=1)
         self.ml=np.array(self.ml,dtype=np.intc)
         self.nl=np.array(self.nl,dtype=np.intc)
@@ -123,6 +136,7 @@ class psg_lattice:
             self.jlist = np.array(jlist)
             self.filling = filling
             print(jlist)
+            #sys.stdin.read(1)
         else:
             # raise ValueError('Inconsistent Input')
             print(jlist,)
@@ -143,26 +157,23 @@ class psg_lattice:
             muylist= coupling[2,self.nbonds: self.nbonds+self.norbital]
             muzlist= coupling[3,self.nbonds: self.nbonds+self.norbital]
 
-            #fillH.fillH(self.H, u0list,  uxlist, uylist, uzlist, muxlist, muylist, muzlist, self.nbonds,
-            #                    self.ml, self.nl, self.phaselist, self.nsites, self.nband,self.jlist)
             fillH.fillH(self.H, u0list,  uxlist, uylist, uzlist, muxlist, muylist, muzlist, self.nbonds,
-                                self.ml, self.nl, self.phaselist, self.nsites, self.nband)
+                                self.ml, self.nl, self.phaselist, self.nsites, self.nband, self.jlist)
         else:
             print('Invalid input, incorrect number of bond/site amplitudes')
 
     def fermi_function(self, energy, fermi_energy):
         if self.temperature < 0.001:
-            return np.heaviside(fermi_energy-energy, 0.5)
+            return np.heaviside(fermi_energy-energy, 1.0)
         else:
             return 1. / (np.exp((energy - fermi_energy) / self.temperature) + 1.)
+
     def calc_energy(self, icoupling):
         if(self.current_ansatz==-1) :
             raise Exception("set the ansatz, you cunt")
         #print(self.ansatzen)
-        cost_arr =np.zeros(7,dtype=complex)
 
         transform_matrix = self.ansatzen[self. current_ansatz][1]
-        n_icouplings = self.ansatzen[self. current_ansatz][0]
         couplings = np.dot(transform_matrix, icoupling)
         #couplings is [delta,bonds+sites]
         self.make_hamiltonian(couplings)
@@ -170,42 +181,46 @@ class psg_lattice:
 
         sol = np.linalg.eigh(self.H)
         energies = sol[0]
-        eigenvec = sol[1]
         flattened_energies = energies.flatten()
-        flattened_eigenvec = eigenvec.swapaxes(1, 2).reshape(self.nsites*self.nband, self.nband).T
-        fermi_energy = np.sort(energies, axis = None)[(int(self.filling+self.norbital)//2)*self.nsites - 1]
+
+        se=np.sort(flattened_energies)
+        np.savetxt("energies.txt",se)
+        print("sum=",np.sum(se[:self.nsites*self.norbital])/self.nsites)
         fermi_energy=0
         fermi_dist = self.fermi_function(flattened_energies, fermi_energy)
         return np.dot(fermi_dist,flattened_energies)/(self.nsites)
 
-    def calc_exps(self, icoupling):
+            
+    def calc_exps(self, icoupling,u1=False):
         if(self.current_ansatz==-1) :
             raise Exception("set the ansatz, you cunt")
         #print(self.ansatzen)
-        cost_arr =np.zeros(7,dtype=complex)
 
         transform_matrix = self.ansatzen[self. current_ansatz][1]
-        n_icouplings = self.ansatzen[self. current_ansatz][0]
         couplings = np.dot(transform_matrix, icoupling)
-        #couplings is [delta,bonds+sites]
         self.make_hamiltonian(couplings)
-        #print("norm=",np.linalg.norm(self.H[30]-np.conjugate(np.transpose(self.H[30]))))
+
+        if(u1) :
+            h1=self.H[:,:self.norbital,:self.norbital];
+            e1=np.linalg.eigvalsh(h1)
+            e1=np.sort(e1.flatten())
+            #np.savetxt("energies.txt",e1/4)
+            mu=e1[(self.nsites*self.norbital)//2]
+            #print("sum=",2*np.sum(e1[:(self.nsites*self.norbital)//2])/(self.nsites*6));
+            muarr=np.hstack([-mu*np.ones(self.norbital),mu*np.ones(self.norbital)])
+            muarr=np.diag(muarr)
+
+            self.H+=muarr
 
         sol = np.linalg.eigh(self.H)
         energies = sol[0]
         eigenvec = sol[1]
         flattened_energies = energies.flatten()
         flattened_eigenvec = eigenvec.swapaxes(1, 2).reshape(self.nsites*self.nband, self.nband).T
-        fermi_energy = np.sort(energies, axis = None)[(int(self.filling+self.norbital)//2)*self.nsites - 1]
-        #print("actual fermi energy=",fermi_energy)
-        fermi_energy=0
+        fermi_energy=0;
         fermi_dist = self.fermi_function(flattened_energies, fermi_energy)
-
-
-        #for general su2 symmetric case, we might need all of tx,ty,tz. We have tz appearing in TR, so
-        # we have two real couplings per bond and site
         bond_exps=np.zeros([self.nbonds,4],dtype=complex) # four elements of the matrix
-        site_exps=np.zeros([self.nsites,4],dtype=complex)
+        site_exps=np.zeros([self.norbital,4],dtype=complex)
         for i in range(self.nbonds):
 
             m_u = self.ml[i] #m_up
@@ -265,20 +280,31 @@ class psg_lattice:
             pair2= -(np.dot(flattened_eigenvec[m_dd].conj()
                                             *fermi_dist,
                                         flattened_eigenvec[m_u].T))/self.nsites
-            #print("m=",m,"print exps",hop1,hop2)
-            #print(fermi_dist[self.nsites*self.nband//2],fermi_dist[self.nsites*self.nband//2+1],fermi_dist[self.nsites*self.nband//2-1])
-            #print(flattened_energies[self.nsites*self.nband//2],flattened_energies[self.nsites*self.nband//2+1],flattened_energies[self.nsites*self.nband//2-1])
-            #sys.stdin.read(1)
 
             site_exps[m,0]=(hop1-hop2)
             site_exps[m,3]=hop1+hop2
             site_exps[m,1]=pair1-pair2
             site_exps[m,2]=1j*(pair1+pair2)
             tot+=(hop1-hop2);
+            #print("hops",hop1,hop2,site_exps[m,3],self.norbital)
+            #sys.stdin.read(1)
 
 
 
-        return bond_exps,site_exps
+        #en calc
+        bcouplings=couplings[:,:self.nbonds]
+        scouplings=couplings[:,self.nbonds:]
+        ben=np.array(bcouplings*bond_exps.T)
+        ben=np.sum(np.sum(ben,axis=0)*np.array(self.jlist))
+        cen=np.array(bcouplings*bcouplings)
+        cen=np.sum(np.sum(cen,axis=0)*np.array(self.jlist))
+        sen=np.array(scouplings*(site_exps.T-1.0))
+        sen=np.sum(sen)
+        en=-2*ben+sen+cen
+        print("comps:",en.real/(24),-2*ben.real/(24),sen.real/(24),cen.real/(24))
+
+        #energy=np.dot(couplings,bond_exps
+        return bond_exps,site_exps,en
 
 
 
@@ -301,8 +327,6 @@ class psg_lattice:
         flattened_energies = energies.flatten()
         flattened_eigenvec = eigenvec.swapaxes(1, 2).reshape(self.nsites*self.nband, self.nband).T
         fermi_energy = np.sort(energies, axis = None)[(int(self.filling+self.norbital)//2)*self.nsites - 1]
-        fermi_energy=0
-        np.savetxt('flat.txt',np.sort(flattened_energies))
         fermi_dist = self.fermi_function(flattened_energies, fermi_energy)
         fe=flattened_energies
         te=0
@@ -347,9 +371,6 @@ class psg_lattice:
             bond_exps[i,0]=(hop1-hop2)
             bond_exps[i,1]=(pair1-pair2)
             bond_exps[i,2]=1j*(pair1+pair2)
-            print("bond=",i)
-            testmat=np.array([hop1,pair1,-pair2,-hop2])
-            print(testmat.reshape([2,2]))
             #print(bond_exps[i,:])
 
             #cost funcs later
@@ -438,7 +459,6 @@ class psg_lattice:
         
         fermi_energy = np.sort(energies, axis = None)[self.nsites*self.norbital-1]
         print("fermi energy=",fermi_energy);
-        np.savetxt('flat.txt',np.sort(energies.flatten()))
 
         for m in range(self.nband):
             for n in range(self.nband) :
